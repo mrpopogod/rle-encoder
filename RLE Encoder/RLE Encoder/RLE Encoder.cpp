@@ -1,6 +1,7 @@
 // RLE Encoder.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
 
+#include <algorithm>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -47,35 +48,122 @@ int main()
 * $FF - End of stream
 * 
 * Need at least three repeated to be worth using the repeated form
+* 
+* Adapted from Python example: https://github.com/sobodash/graveyardduck/blob/master/graveduck.py
+* 
+* bit_start - pointer to our initial position in the RGBA array
+* width - the width of a row
+* tile_size - how big a tile is
+* metatile_codes - mapping of tile_string to encoded identifier
+* height - the height if we're encoding columns rather than rows
 */
-
-string rle_row(RGBA* bit_start, int width, int tile_size, map<string, char>& metatile_codes)
+string rle_encode(RGBA* bit_start, int bit_end, int bit_step, int width, int tile_size, map<string, char>& metatile_codes, int height = 0)
 {
-    // Python example: https://github.com/sobodash/graveyardduck/blob/master/graveduck.py
-    string curr_tile_string = "";
-    int curr_length = 0;
-    stringstream ss;
-    for (int i = 0; i < width; i += tile_size)
+    int bit_end = width;
+    int bit_step = tile_size;
+    if (height)
+    {
+        bit_end = height * width;
+        bit_step = tile_size * width;
+    }
+
+    vector<char> final_values;
+    vector<char> running_tiles;
+    int i = 0;
+    while (i < bit_end)
     {
         string tile_string = make_tile_string(bit_start + i, width, tile_size);
-        if (curr_length == 0)
+        int count = 0;
+        int last = i;
+
+        // iterate through until we either reach the end or find a new tile
+        while (i < bit_end && make_tile_string(bit_start + i, width, tile_size) == tile_string)
         {
-            curr_tile_string = tile_string;
-            curr_length++;
-            continue;
+            count++;
+            i += bit_step;
         }
 
-        if (tile_string != curr_tile_string)
+        // only if we have at least three repeated tiles should we bother encoding as a run
+        if (count > 2)
         {
-            // TODO: Need to split between length > 2 and not
-            // If length > 2 then we do the simple repeated formulation
-            // If length 1-2 then we add it to what we're building
-            
+            // if we had a mishmash before encountering this run make sure we put that into the final first
+            if (!running_tiles.empty())
+            {
+                final_values.push_back((char)0x80 + running_tiles.size());
+                final_values.insert(final_values.end(), running_tiles.begin(), running_tiles.end());
+            }
+
+            // a run can only be so long
+            if (count > 0x7F)
+            {
+                while (count > 0x7F)
+                {
+                    final_values.push_back(0x7F);
+                    final_values.push_back(metatile_codes[tile_string]);
+                    count -= 0x7F;
+                }
+            }
+
+            // encode the run and reset our state
+            final_values.push_back((char)count);
+            final_values.push_back(metatile_codes[tile_string]);
+            running_tiles.clear();
+        }
+        else // need to collect the random tiles that will be literals
+        {
+            // intialize the literals
+            if (running_tiles.empty())
+            {
+                // will only ever be 1 or 2
+                for (int j = last; j < i; j += bit_step)
+                {
+                    string temp_tile_string = make_tile_string(bit_start + j, width, tile_size);
+                    running_tiles.push_back(metatile_codes[temp_tile_string]);
+                }
+            }
+            else // already had a collection of literals
+            {
+                // if our size is too big then we need to flush and start a new segment
+                if (running_tiles.size() > 0xFC - 0x80)
+                {
+                    final_values.push_back((char)0x80 + running_tiles.size());
+                    final_values.insert(final_values.end(), running_tiles.begin(), running_tiles.end());
+                    running_tiles.clear();
+                }
+                else
+                {
+                    // will only ever be 1 or 2
+                    for (int j = last; j < i; j += bit_step)
+                    {
+                        string temp_tile_string = make_tile_string(bit_start + j, width, tile_size);
+                        running_tiles.push_back(metatile_codes[temp_tile_string]);
+                    }
+                }
+            }
         }
     }
 
+    // get any leftover unencoded stuff
+    if (!running_tiles.empty())
+    {
+        final_values.push_back((char)0x80 + running_tiles.size());
+        final_values.insert(final_values.end(), running_tiles.begin(), running_tiles.end());
+    }
 
-    return ss.str();
+    // terminate the string
+    final_values.push_back((char)0xFF);
+
+    vector<string> converted_values;
+    chars_to_hex(final_values, converted_values);
+
+    stringstream ss;
+    for_each(converted_values.begin(), converted_values.end(), [&ss](string& s) { ss << s << ", "; });
+    string retval = ss.str();
+    // erase trailing ", "
+    retval.pop_back();
+    retval.pop_back();
+    
+    return retval;
 }
 
 /*
