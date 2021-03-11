@@ -13,31 +13,37 @@
 
 using namespace std;
 
-int main()
+/*
+* Converts a vector of chars to a string representation ready for concatination.
+* e.g. 0x01, 0xA3, 0xFF -> "$01", "$A3", "$FF"
+*/
+void chars_to_hex(vector<char>& input, vector<string>& output)
 {
-    CBitmap bitmap("test.bmp");
-
-    int metatile_size = 16;
-    set<string> metatiles;
-    RGBA* bits = (RGBA*) bitmap.GetBits();
-
-    // Figure out what our metatiles are for final output
-    for (int i = 0; i < bitmap.GetHeight(); i += metatile_size)
+    for (auto& el : input)
     {
-        for (int j = i; j < bitmap.GetWidth() + i; j += metatile_size)
+        stringstream ss;
+        ss << "$";
+        ss << setfill('0') << setw(2) << hex << (0xff & (unsigned int)el);
+        output.push_back(ss.str());
+    }
+}
+
+/*
+* Stringify a tile for easy comparison
+*/
+string make_tile_string(RGBA* bit_start, int width, int tile_size)
+{
+    stringstream ss;
+    for (int i = 0; i < tile_size * width; i += width)
+    {
+        for (int j = i; j < i + tile_size; j++)
         {
-            string tile_string = make_tile_string(bits + j, bitmap.GetWidth(), metatile_size);
-            metatiles.insert(tile_string);
+            RGBA* pixel = bit_start + j;
+            ss << pixel->Red << pixel->Green << pixel->Blue;
         }
     }
 
-    map<string, char> metatile_codes;
-    char code = 0;
-    for (auto metatile : metatiles)
-    {
-        metatile_codes[metatile] = code;
-        code++;
-    }
+    return ss.str();
 }
 
 /*
@@ -57,7 +63,7 @@ int main()
 * metatile_codes - mapping of tile_string to encoded identifier
 * height - the height if we're encoding columns rather than rows
 */
-string rle_encode(RGBA* bit_start, int bit_end, int bit_step, int width, int tile_size, map<string, char>& metatile_codes, int height = 0)
+string rle_encode(RGBA* bit_start, int width, int tile_size, map<string, char>& metatile_codes, int height = 0)
 {
     int bit_end = width;
     int bit_step = tile_size;
@@ -166,32 +172,53 @@ string rle_encode(RGBA* bit_start, int bit_end, int bit_step, int width, int til
     return retval;
 }
 
-/*
-* Converts a vector of chars to a string representation ready for concatination.
-* e.g. 0x01, 0xA3, 0xFF -> "$01", "$A3", "$FF"
-*/
-void chars_to_hex(vector<char>& input, vector<string>& output)
+// TODO: Fuck me, bitmaps are encoded in the wrong direction.  Which is fine for horizontal, just reverse the order
+// But for vertical that fucks up the entire encoding.  Need to solve for that
+int main()
 {
-    for (auto& el : input)
-    {
-        stringstream ss;
-        ss << "$";
-        ss << setfill('0') << setw(2) << hex << (0xff & (unsigned int)el);
-        output.push_back(ss.str());
-    }
-}
+    CBitmap bitmap("worldmap3.bmp");
 
-string make_tile_string(RGBA* bit_start, int width, int tile_size)
-{
-    stringstream ss;
-    for (int i = 0; i < tile_size; i += width)
+    int metatile_size = 16;
+    set<string> metatiles;
+    RGBA* bits = (RGBA*)bitmap.GetBits();
+
+    // Figure out what our metatiles are for final output
+    for (int i = 0; i < bitmap.GetHeight() * bitmap.GetWidth(); i += metatile_size * bitmap.GetWidth())
     {
-        for (int j = i; j < i + tile_size; j++)
+        for (int j = i; j < bitmap.GetWidth() + i; j += metatile_size)
         {
-            RGBA* pixel = bit_start + j;
-            ss << pixel->Red << pixel->Green << pixel->Blue;
+            string tile_string = make_tile_string(bits + j, bitmap.GetWidth(), metatile_size);
+            metatiles.insert(tile_string);
         }
     }
 
-    return ss.str();
+    map<string, char> metatile_codes;
+    char code = 0;
+    for (auto metatile : metatiles)
+    {
+        metatile_codes[metatile] = code;
+        code++;
+    }
+
+    vector<string> horizontal_codings;
+    // Encode horizontal strips
+    for (int i = 0; i < bitmap.GetHeight() * bitmap.GetWidth(); i += metatile_size * bitmap.GetWidth())
+    {
+        horizontal_codings.push_back(rle_encode(bits + i, bitmap.GetWidth(), metatile_size, metatile_codes));
+    }
+
+    int total_size = 0;
+    for (auto coding : horizontal_codings)
+    {
+        total_size += (coding.length() / 5 + 1);
+    }
+
+    vector<string> vertical_codings;
+    // Encode vertical strips
+    /*for (int i = 0; i < bitmap.GetWidth(); i += metatile_size)
+    {
+        vertical_codings.push_back(rle_encode(bits + i, bitmap.GetWidth(), metatile_size, metatile_codes, bitmap.GetHeight()));
+    }*/
+
+    cout << "Did the thing";
 }
