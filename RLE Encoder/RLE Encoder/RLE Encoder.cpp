@@ -176,7 +176,7 @@ string rle_encode(RGBA* bit_start, int width, int tile_size, map<string, char>& 
 // But for vertical that fucks up the entire encoding.  Need to solve for that
 int main()
 {
-    CBitmap bitmap("worldmap3.bmp");
+    CBitmap bitmap("testmap.bmp");
 
     int metatile_size = 16;
     set<string> metatiles;
