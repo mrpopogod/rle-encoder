@@ -57,27 +57,37 @@ string make_tile_string(RGBA* bit_start, int width, int tile_size)
 * 
 * Adapted from Python example: https://github.com/sobodash/graveyardduck/blob/master/graveduck.py
 * 
+* Defaults to coding a horizontal row that begins at bit_start, but can instead code a vertical column if height is set.
+* 
 * bit_start - pointer to our initial position in the RGBA array
 * width - how wide a line is
 * tile_size - how big a tile is
 * metatile_codes - mapping of tile_string to encoded identifier
+* height - if greater than zero then set vertical encoding mode and use this as the height of the image
 */
-string horizontal_rle_encode(RGBA* bit_start, int width, int tile_size, map<string, char>& metatile_codes)
+string rle_encode(RGBA* bit_start, int width, int tile_size, map<string, char>& metatile_codes, int height = 0)
 {
     int bit_end = width;
     int bit_step = tile_size;
+    int sign = 1;
+    if (height > 0)
+    {
+        bit_end = width * height;
+        bit_step = tile_size * width;
+        sign = -1;
+    }
 
     vector<char> final_values;
     vector<char> running_tiles;
     int i = 0;
     while (i < bit_end)
     {
-        string tile_string = make_tile_string(bit_start + i, width, tile_size);
+        string tile_string = make_tile_string(bit_start + (sign * i), width, tile_size);
         int count = 0;
         int last = i;
 
         // iterate through until we either reach the end or find a new tile
-        while (i < bit_end && make_tile_string(bit_start + i, width, tile_size) == tile_string)
+        while (i < bit_end && make_tile_string(bit_start + (sign * i), width, tile_size) == tile_string)
         {
             count++;
             i += bit_step;
@@ -117,7 +127,7 @@ string horizontal_rle_encode(RGBA* bit_start, int width, int tile_size, map<stri
                 // will only ever be 1 or 2
                 for (int j = last; j < i; j += bit_step)
                 {
-                    string temp_tile_string = make_tile_string(bit_start + j, width, tile_size);
+                    string temp_tile_string = make_tile_string(bit_start + (sign * j), width, tile_size);
                     running_tiles.push_back(metatile_codes[temp_tile_string]);
                 }
             }
@@ -135,114 +145,7 @@ string horizontal_rle_encode(RGBA* bit_start, int width, int tile_size, map<stri
                     // will only ever be 1 or 2
                     for (int j = last; j < i; j += bit_step)
                     {
-                        string temp_tile_string = make_tile_string(bit_start + j, width, tile_size);
-                        running_tiles.push_back(metatile_codes[temp_tile_string]);
-                    }
-                }
-            }
-        }
-    }
-
-    // get any leftover unencoded stuff
-    if (!running_tiles.empty())
-    {
-        final_values.push_back((char)0x80 + running_tiles.size());
-        final_values.insert(final_values.end(), running_tiles.begin(), running_tiles.end());
-    }
-
-    // terminate the string
-    final_values.push_back((char)0xFF);
-
-    vector<string> converted_values;
-    chars_to_hex(final_values, converted_values);
-
-    stringstream ss;
-    for_each(converted_values.begin(), converted_values.end(), [&ss](string& s) { ss << s << ", "; });
-    string retval = ss.str();
-    // erase trailing ", "
-    retval.pop_back();
-    retval.pop_back();
-    
-    return retval;
-}
-
-/*
-* Basically the same as horizontal rle encode, except we have to negate a bunch of stuff (refactor into one method)
-*/
-string vertical_rle_encode(RGBA* bit_start, int width, int height, int tile_size, map<string, char>& metatile_codes)
-{
-    int bit_end = width * height;
-    int bit_step = tile_size * width;
-
-    vector<char> final_values;
-    vector<char> running_tiles;
-    int i = 0;
-    while (i < bit_end)
-    {
-        string tile_string = make_tile_string(bit_start - i, width, tile_size);
-        int count = 0;
-        int last = i;
-
-        // iterate through until we either reach the end or find a new tile
-        while (i < bit_end && make_tile_string(bit_start - i, width, tile_size) == tile_string)
-        {
-            count++;
-            i += bit_step;
-        }
-
-        // only if we have at least three repeated tiles should we bother encoding as a run
-        if (count > 2)
-        {
-            // if we had a mishmash before encountering this run make sure we put that into the final first
-            if (!running_tiles.empty())
-            {
-                final_values.push_back((char)0x80 + running_tiles.size());
-                final_values.insert(final_values.end(), running_tiles.begin(), running_tiles.end());
-            }
-
-            // a run can only be so long
-            if (count > 0x7F)
-            {
-                while (count > 0x7F)
-                {
-                    final_values.push_back(0x7F);
-                    final_values.push_back(metatile_codes[tile_string]);
-                    count -= 0x7F;
-                }
-            }
-
-            // encode the run and reset our state
-            final_values.push_back((char)count);
-            final_values.push_back(metatile_codes[tile_string]);
-            running_tiles.clear();
-        }
-        else // need to collect the random tiles that will be literals
-        {
-            // intialize the literals
-            if (running_tiles.empty())
-            {
-                // will only ever be 1 or 2
-                for (int j = last; j < i; j += bit_step)
-                {
-                    string temp_tile_string = make_tile_string(bit_start - j, width, tile_size);
-                    running_tiles.push_back(metatile_codes[temp_tile_string]);
-                }
-            }
-            else // already had a collection of literals
-            {
-                // if our size is too big then we need to flush and start a new segment
-                if (running_tiles.size() > 0xFC - 0x80)
-                {
-                    final_values.push_back((char)0x80 + running_tiles.size());
-                    final_values.insert(final_values.end(), running_tiles.begin(), running_tiles.end());
-                    running_tiles.clear();
-                }
-                else
-                {
-                    // will only ever be 1 or 2
-                    for (int j = last; j < i; j += bit_step)
-                    {
-                        string temp_tile_string = make_tile_string(bit_start - j, width, tile_size);
+                        string temp_tile_string = make_tile_string(bit_start + (sign * j), width, tile_size);
                         running_tiles.push_back(metatile_codes[temp_tile_string]);
                     }
                 }
@@ -306,7 +209,7 @@ int main()
     // Encode horizontal strips
     for (int i = upper_left; i >= 0; i -= metatile_size * bitmap.GetWidth())
     {
-        horizontal_codings.push_back(horizontal_rle_encode(bits + i, bitmap.GetWidth(), metatile_size, metatile_codes));
+        horizontal_codings.push_back(rle_encode(bits + i, bitmap.GetWidth(), metatile_size, metatile_codes));
     }
 
     int total_size = 0;
@@ -319,7 +222,7 @@ int main()
     // Encode vertical strips
     for (int i = upper_left; i < bitmap.GetWidth() + upper_left; i += metatile_size)
     {
-        vertical_codings.push_back(vertical_rle_encode(bits + i, bitmap.GetWidth(), bitmap.GetHeight(), metatile_size, metatile_codes));
+        vertical_codings.push_back(rle_encode(bits + i, bitmap.GetWidth(), metatile_size, metatile_codes, bitmap.GetHeight()));
     }
 
     total_size = 0;
