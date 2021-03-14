@@ -39,11 +39,39 @@ string make_tile_string(RGBA* bit_start, int width, int tile_size)
         for (int j = i; j < i + tile_size; j++)
         {
             RGBA* pixel = bit_start + j;
+            // Pixel will be converted to three chars in a string, which easily can be turned back into a bitmap with no alpha channel
             ss << pixel->Red << pixel->Green << pixel->Blue;
         }
     }
 
     return ss.str();
+}
+
+/*
+* Output a bitmap for a stringified tile
+*/
+void output_bitmap(string tile, char code, int tile_size)
+{
+    // Need to reverse the order of rows back to what bitmap is expecting
+    const char* chars = tile.c_str();
+    int length = tile.size();
+    char* bits = new char[length];
+    int k = 0;
+    for (int i = (tile_size - 1) * tile_size * 3; i >= 0; i -= tile_size * 3) // * 3 because each pixel is 3 chars
+    {
+        for (int j = i; j < i + (tile_size * 3); j++)
+        {
+            bits[k] = chars[j];
+            k++;
+        }
+    }
+
+    CBitmap bitmap;
+    bitmap.SetBits(bits, tile_size, tile_size, 0x0000FF, 0x00FF00, 0xFF0000);
+    stringstream ss;
+    ss << "tile" << (int)code << ".bmp";  // need to cast or else it will render the char
+    bitmap.Save(ss.str().c_str(), 24);
+    delete[] bits;
 }
 
 /*
@@ -212,12 +240,6 @@ int main()
         horizontal_codings.push_back(rle_encode(bits + i, bitmap.GetWidth(), metatile_size, metatile_codes));
     }
 
-    int total_size = 0;
-    for (auto coding : horizontal_codings)
-    {
-        total_size += (coding.length() / 5 + 1);
-    }
-
     vector<string> vertical_codings;
     // Encode vertical strips
     for (int i = upper_left; i < bitmap.GetWidth() + upper_left; i += metatile_size)
@@ -225,11 +247,25 @@ int main()
         vertical_codings.push_back(rle_encode(bits + i, bitmap.GetWidth(), metatile_size, metatile_codes, bitmap.GetHeight()));
     }
 
-    total_size = 0;
-    for (auto coding : vertical_codings)
+    ofstream output;
+    output.open("horizontal.txt");
+    for (auto& coding : horizontal_codings)
     {
-        total_size += (coding.length() / 5 + 1);
+        output << coding << endl;
     }
 
-    cout << "Did the thing";
+    output.close();
+
+    output.open("vertical.txt");
+    for (auto& coding : vertical_codings)
+    {
+        output << coding << endl;
+    }
+
+    output.close();
+
+    for (auto& entry : metatile_codes)
+    {
+        output_bitmap(entry.first, entry.second, metatile_size);
+    }
 }
