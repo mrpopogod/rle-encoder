@@ -24,6 +24,7 @@
     <ProjectGuid>{0afc34d1-f43c-4419-9542-c3cb0896b213}</ProjectGuid>
     <RootNamespace>RLEEncoder</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>RLEEncoder</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -140,7 +141,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="RLE Encoder.cpp" />
+    <ClCompile Include="RLEEncoder.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\bitmap.h" />

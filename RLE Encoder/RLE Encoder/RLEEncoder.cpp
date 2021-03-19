@@ -10,6 +10,7 @@
 #include <sstream>
 #include <vector>
 #include "include/bitmap.h"
+#include "include/cxxopts/cxxopts.hpp"
 
 using namespace std;
 
@@ -17,7 +18,7 @@ using namespace std;
 * Converts a vector of chars to a string representation ready for concatination.
 * e.g. 0x01, 0xA3, 0xFF -> "$01", "$A3", "$FF"
 */
-void chars_to_hex(vector<char>& input, vector<string>& output)
+void chars_to_hex(const vector<char>& input, vector<string>& output)
 {
     for (auto& el : input)
     {
@@ -31,14 +32,14 @@ void chars_to_hex(vector<char>& input, vector<string>& output)
 /*
 * Stringify a tile for easy comparison
 */
-string make_tile_string(RGBA* bit_start, int width, int tile_size)
+string make_tile_string(const RGBA* bit_start, int width, int tile_size)
 {
     stringstream ss;
     for (int i = 0; i > -tile_size * width; i -= width)
     {
         for (int j = i; j < i + tile_size; j++)
         {
-            RGBA* pixel = bit_start + j;
+            const RGBA* pixel = bit_start + j;
             // Pixel will be converted to three chars in a string, which easily can be turned back into a bitmap with no alpha channel
             ss << pixel->Red << pixel->Green << pixel->Blue;
         }
@@ -50,7 +51,7 @@ string make_tile_string(RGBA* bit_start, int width, int tile_size)
 /*
 * Output a bitmap for a stringified tile
 */
-void output_bitmap(string tile, char code, int tile_size)
+void output_bitmap(const string& tile, char code, int tile_size, const string& output_base)
 {
     // Need to reverse the order of rows back to what bitmap is expecting
     const char* chars = tile.c_str();
@@ -69,7 +70,7 @@ void output_bitmap(string tile, char code, int tile_size)
     CBitmap bitmap;
     bitmap.SetBits(bits, tile_size, tile_size, 0x0000FF, 0x00FF00, 0xFF0000);
     stringstream ss;
-    ss << "tile" << (int)code << ".bmp";  // need to cast or else it will render the char
+    ss << output_base << "-tile" << (int)code << ".bmp";  // need to cast or else it will render the char
     bitmap.Save(ss.str().c_str(), 24);
     delete[] bits;
 }
@@ -93,7 +94,7 @@ void output_bitmap(string tile, char code, int tile_size)
 * metatile_codes - mapping of tile_string to encoded identifier
 * height - if greater than zero then set vertical encoding mode and use this as the height of the image
 */
-string rle_encode(RGBA* bit_start, int width, int tile_size, map<string, char>& metatile_codes, int height = 0)
+string rle_encode(const RGBA* bit_start, int width, int tile_size, const map<string, char>& metatile_codes, int height = 0)
 {
     int bit_end = width;
     int bit_step = tile_size;
@@ -137,14 +138,14 @@ string rle_encode(RGBA* bit_start, int width, int tile_size, map<string, char>& 
                 while (count > 0x7F)
                 {
                     final_values.push_back(0x7F);
-                    final_values.push_back(metatile_codes[tile_string]);
+                    final_values.push_back(metatile_codes.at(tile_string));
                     count -= 0x7F;
                 }
             }
 
             // encode the run and reset our state
             final_values.push_back((char)count);
-            final_values.push_back(metatile_codes[tile_string]);
+            final_values.push_back(metatile_codes.at(tile_string));
             running_tiles.clear();
         }
         else // need to collect the random tiles that will be literals
@@ -156,7 +157,7 @@ string rle_encode(RGBA* bit_start, int width, int tile_size, map<string, char>& 
                 for (int j = last; j < i; j += bit_step)
                 {
                     string temp_tile_string = make_tile_string(bit_start + (sign * j), width, tile_size);
-                    running_tiles.push_back(metatile_codes[temp_tile_string]);
+                    running_tiles.push_back(metatile_codes.at(temp_tile_string));
                 }
             }
             else // already had a collection of literals
@@ -174,7 +175,7 @@ string rle_encode(RGBA* bit_start, int width, int tile_size, map<string, char>& 
                     for (int j = last; j < i; j += bit_step)
                     {
                         string temp_tile_string = make_tile_string(bit_start + (sign * j), width, tile_size);
-                        running_tiles.push_back(metatile_codes[temp_tile_string]);
+                        running_tiles.push_back(metatile_codes.at(temp_tile_string));
                     }
                 }
             }
@@ -204,11 +205,72 @@ string rle_encode(RGBA* bit_start, int width, int tile_size, map<string, char>& 
     return retval;
 }
 
-int main()
+void print_usage(const cxxopts::Options& options)
 {
-    CBitmap bitmap("testmap.bmp");
+    cout << options.help() << endl;
+}
 
-    int metatile_size = 16;
+bool validate_args(const cxxopts::ParseResult& result, string& map_name, string& output_base, int& tile_size)
+{
+    map_name = result["map"].as<string>();
+    if (map_name.empty())
+    {
+        cout << "No map provided" << endl;
+        return false;
+    }
+
+    output_base = result["output"].as<string>();
+    if (output_base.empty())
+    {
+        cout << "Empty output provided" << endl;
+    }
+
+    tile_size = result["tileSize"].as<int>();
+    if (tile_size < 8)
+    {
+        cout << "Tile size must be at least 8 pixels" << endl;
+        return false;
+    }
+
+    return true;
+}
+
+int main(int argc, char** argv)
+{
+    cxxopts::Options options("RLE Encoder", "Utility to RLE encode a bitmap using the Konami algorithm");
+    options.add_options()
+        ("m,map", "Map to parse and encode", cxxopts::value<string>()->default_value(""))
+        ("o,output", "Base name for output files (default: out)", cxxopts::value<string>()->default_value("out"))
+        ("t,tileSize", "Size of tiles to RLE encode (default: 16", cxxopts::value<int>()->default_value("16"))
+        ("h,help", "Print usage")
+        ;
+
+    string map_name;
+    string output_base;
+    int metatile_size;
+    try
+    {
+        auto result = options.parse(argc, argv);
+        if (result.count("help"))
+        {
+            print_usage(options);
+            exit(0);
+        }
+
+        if (!validate_args(result, map_name, output_base, metatile_size))
+        {
+            print_usage(options);
+            exit(1);
+        }
+    }
+    catch (exception e)
+    {
+        print_usage(options);
+        exit(0);
+    }
+
+    CBitmap bitmap(map_name.c_str());
+
     set<string> metatiles;
     RGBA* bits = (RGBA*)bitmap.GetBits();
 
@@ -248,7 +310,7 @@ int main()
     }
 
     ofstream output;
-    output.open("horizontal.txt");
+    output.open(output_base + "-horizontal.txt");
     for (auto& coding : horizontal_codings)
     {
         output << coding << endl;
@@ -256,7 +318,7 @@ int main()
 
     output.close();
 
-    output.open("vertical.txt");
+    output.open(output_base + "-vertical.txt");
     for (auto& coding : vertical_codings)
     {
         output << coding << endl;
@@ -266,6 +328,6 @@ int main()
 
     for (auto& entry : metatile_codes)
     {
-        output_bitmap(entry.first, entry.second, metatile_size);
+        output_bitmap(entry.first, entry.second, metatile_size, output_base);
     }
 }
