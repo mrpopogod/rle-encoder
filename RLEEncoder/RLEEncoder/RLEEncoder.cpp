@@ -276,6 +276,12 @@ int main(int argc, char** argv)
         exit(1);
     }
 
+    if (bitmap.GetHeight() % metatile_size || bitmap.GetWidth() % metatile_size)
+    {
+        cout << "Bitmap dimensions must be evenly divisible by the tile size" << endl;
+        exit(1);
+    }
+
     set<string> metatiles;
     RGBA* bits = (RGBA*)bitmap.GetBits();
 
