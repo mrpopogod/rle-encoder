@@ -269,7 +269,12 @@ int main(int argc, char** argv)
         exit(0);
     }
 
-    CBitmap bitmap(map_name.c_str());
+    CBitmap bitmap;
+    if (!bitmap.Load((map_name.c_str())))
+    {
+        cout << "Bitmap not found" << endl;
+        exit(1);
+    }
 
     set<string> metatiles;
     RGBA* bits = (RGBA*)bitmap.GetBits();
