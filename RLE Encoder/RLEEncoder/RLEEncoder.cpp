@@ -287,6 +287,12 @@ int main(int argc, char** argv)
         }
     }
 
+    if (metatiles.size() > 256)
+    {
+        cout << "Too many metatiles generated at provided tile size: " << metatiles.size() << endl;
+        exit(1);
+    }
+
     map<string, char> metatile_codes;
     char code = 0;
     for (auto metatile : metatiles)
