@@ -289,6 +289,12 @@ int main(int argc, char** argv)
     int upper_left = (bitmap.GetHeight() - 1) * bitmap.GetWidth();
 
     // Figure out what our metatiles are for final output
+    // TODO: give caller the option to pass in a file that maps metatile bitmaps to their code and use that to
+    // generate the metatile_codes map; would let us skip this for loop and the next one and give us control
+    // over how things are encoded; especially important for attribute tables but also nice if you want your
+    // metatiles to have some order to them, rather than the arbitrary order we get by generating it from the map.
+    // But still leave in this method because it could be useful (hell, even if it's to do a first pass and create the
+    // metatiles before then giving them your own codes and re-encoding the map)
     for (int i = upper_left; i >= 0; i -= metatile_size * bitmap.GetWidth())
     {
         for (int j = i; j < bitmap.GetWidth() + i; j += metatile_size)
