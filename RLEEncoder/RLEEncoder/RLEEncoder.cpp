@@ -2,6 +2,7 @@
 //
 
 #include <algorithm>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -24,7 +25,7 @@ void chars_to_hex(const vector<char>& input, vector<string>& output)
     {
         stringstream ss;
         ss << "$";
-        ss << setfill('0') << setw(2) << hex << (0xff & (unsigned int)el);
+        ss << setfill('0') << setw(2) << uppercase << hex << (0xff & (unsigned int)el);
         output.push_back(ss.str());
     }
 }
@@ -210,7 +211,7 @@ void print_usage(const cxxopts::Options& options)
     cout << options.help() << endl;
 }
 
-bool validate_args(const cxxopts::ParseResult& result, string& map_name, string& output_base, int& tile_size)
+bool validate_args(const cxxopts::ParseResult& result, string& map_name, string& output_base, int& tile_size, string& file_of_mappings)
 {
     map_name = result["map"].as<string>();
     if (map_name.empty())
@@ -232,7 +233,45 @@ bool validate_args(const cxxopts::ParseResult& result, string& map_name, string&
         return false;
     }
 
+    file_of_mappings = result["fileOfMappings"].as<string>();
+
     return true;
+}
+
+void populate_metatile_codes(const string& mapping_file, int metatile_size, map<string, char>& metatile_codes)
+{
+    fstream file(mapping_file, ios::in);
+    if (!file.is_open() || !file.good())
+    {
+        cout << "Couldn't open " << mapping_file << endl;
+        exit(1);
+    }
+
+    int upper_left = (metatile_size - 1) * metatile_size;
+    string line;
+    while (getline(file, line))
+    {
+        auto pos = line.find(',');
+        string bitmap_filename = line.substr(0, pos);
+        char code = stoi(line.substr(pos + 1));
+
+        CBitmap bitmap;
+        if (!bitmap.Load((bitmap_filename.c_str())))
+        {
+            cout << "Bitmap " << bitmap_filename << " not found" << endl;
+            exit(1);
+        }
+
+        if (bitmap.GetWidth() != metatile_size || bitmap.GetHeight() != metatile_size)
+        {
+            cout << "Bitmap " << bitmap_filename << " must be the tile size" << endl;
+            exit(1);
+        }
+
+        RGBA* bits = (RGBA*)bitmap.GetBits();
+        string tile_string = make_tile_string(bits + upper_left, metatile_size, metatile_size);
+        metatile_codes[tile_string] = code;
+    }
 }
 
 int main(int argc, char** argv)
@@ -242,12 +281,14 @@ int main(int argc, char** argv)
         ("m,map", "Map to parse and encode", cxxopts::value<string>()->default_value(""))
         ("o,output", "Base name for output files (default: out)", cxxopts::value<string>()->default_value("out"))
         ("t,tileSize", "Size of tiles to RLE encode (default: 16", cxxopts::value<int>()->default_value("16"))
+        ("f,fileOfMappings", "A file that is comma separated bitmap,code separated by newlines. Code should be decimal. (optional)", cxxopts::value<string>()->default_value(""))
         ("h,help", "Print usage")
         ;
 
     string map_name;
     string output_base;
     int metatile_size;
+    string file_of_mappings;
     try
     {
         auto result = options.parse(argc, argv);
@@ -257,7 +298,7 @@ int main(int argc, char** argv)
             exit(0);
         }
 
-        if (!validate_args(result, map_name, output_base, metatile_size))
+        if (!validate_args(result, map_name, output_base, metatile_size, file_of_mappings))
         {
             print_usage(options);
             exit(1);
@@ -272,50 +313,59 @@ int main(int argc, char** argv)
     CBitmap bitmap;
     if (!bitmap.Load((map_name.c_str())))
     {
-        cout << "Bitmap not found" << endl;
+        cout << "Bitmap " << map_name << " not found" << endl;
         exit(1);
     }
 
     if (bitmap.GetHeight() % metatile_size || bitmap.GetWidth() % metatile_size)
     {
-        cout << "Bitmap dimensions must be evenly divisible by the tile size" << endl;
+        cout << "Bitmap " << map_name << " dimensions must be evenly divisible by the tile size" << endl;
         exit(1);
     }
 
-    set<string> metatiles;
+    map<string, char> metatile_codes;
+    if (!file_of_mappings.empty())
+    {
+        populate_metatile_codes(file_of_mappings, metatile_size, metatile_codes);
+    }
+
     RGBA* bits = (RGBA*)bitmap.GetBits();
 
     // Bitmaps index from the lower left, but we want to output index from the upper left
     int upper_left = (bitmap.GetHeight() - 1) * bitmap.GetWidth();
 
-    // Figure out what our metatiles are for final output
-    // TODO: give caller the option to pass in a file that maps metatile bitmaps to their code and use that to
-    // generate the metatile_codes map; would let us skip this for loop and the next one and give us control
-    // over how things are encoded; especially important for attribute tables but also nice if you want your
-    // metatiles to have some order to them, rather than the arbitrary order we get by generating it from the map.
-    // But still leave in this method because it could be useful (hell, even if it's to do a first pass and create the
-    // metatiles before then giving them your own codes and re-encoding the map)
-    for (int i = upper_left; i >= 0; i -= metatile_size * bitmap.GetWidth())
+    // If we weren't provided metatile code mappings calculate it ourselves
+    if (metatile_codes.empty())
     {
-        for (int j = i; j < bitmap.GetWidth() + i; j += metatile_size)
+        set<string> metatiles;
+        // Figure out what our metatiles are for final output
+        // TODO: give caller the option to pass in a file that maps metatile bitmaps to their code and use that to
+        // generate the metatile_codes map; would let us skip this for loop and the next one and give us control
+        // over how things are encoded; especially important for attribute tables but also nice if you want your
+        // metatiles to have some order to them, rather than the arbitrary order we get by generating it from the map.
+        // But still leave in this method because it could be useful (hell, even if it's to do a first pass and create the
+        // metatiles before then giving them your own codes and re-encoding the map)
+        for (int i = upper_left; i >= 0; i -= metatile_size * bitmap.GetWidth())
         {
-            string tile_string = make_tile_string(bits + j, bitmap.GetWidth(), metatile_size);
-            metatiles.insert(tile_string);
+            for (int j = i; j < bitmap.GetWidth() + i; j += metatile_size)
+            {
+                string tile_string = make_tile_string(bits + j, bitmap.GetWidth(), metatile_size);
+                metatiles.insert(tile_string);
+            }
         }
-    }
 
-    if (metatiles.size() > 256)
-    {
-        cout << "Too many metatiles generated at provided tile size: " << metatiles.size() << endl;
-        exit(1);
-    }
+        if (metatiles.size() > 256)
+        {
+            cout << "Too many metatiles generated at provided tile size: " << metatiles.size() << endl;
+            exit(1);
+        }
 
-    map<string, char> metatile_codes;
-    char code = 0;
-    for (auto metatile : metatiles)
-    {
-        metatile_codes[metatile] = code;
-        code++;
+        char code = 0;
+        for (auto metatile : metatiles)
+        {
+            metatile_codes[metatile] = code;
+            code++;
+        }
     }
 
     vector<string> horizontal_codings;
